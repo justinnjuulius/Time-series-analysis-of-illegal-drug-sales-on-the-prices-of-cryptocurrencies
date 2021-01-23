@@ -1,0 +1,1044 @@
+import numpy as np
+import pandas as pd
+import statsmodels.tsa.api as sm
+import matplotlib.pyplot as plt
+from statsmodels.tsa.api import VAR
+import seaborn as sns
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.vector_ar.vecm import coint_johansen
+from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_squared_error
+import math
+from statsmodels.tsa.vector_ar.vecm import VECM
+
+
+### read in csv files ###
+bitcoin = pd.read_csv("bitcoin_price.csv", parse_dates = True, index_col = 1) 
+bitcoin2017 = bitcoin.loc["2017-01-01":"2017-01-31"]
+bitcoin2017.index = pd.to_datetime(bitcoin2017.index.strftime('%Y-%m-%d'))
+bitcoin2017.drop(["Currency", "24h Open (USD)", "24h High (USD)", "24h Low (USD)"],
+          axis = 1, inplace = True)
+bitcoin2017_weekly = bitcoin2017.resample('W-SUN').last()
+bitcoin2017_weekly = bitcoin2017_weekly.rename(columns={"Closing Price (USD)": "Price"})
+
+
+bitcoin = bitcoin.loc["2016-01-01":"2016-12-31"]
+bitcoin.index = pd.to_datetime(bitcoin.index.strftime('%Y-%m-%d'))
+bitcoin.drop(["Currency", "24h Open (USD)", "24h High (USD)", "24h Low (USD)"],
+          axis = 1, inplace = True)
+bitcoin_diff = bitcoin.diff().dropna()
+
+monero = pd.read_csv("monero_price.csv", parse_dates = True, index_col = 0)
+monero = monero.iloc[::-1]
+monero.drop(["Open", "High", "Low", "Vol.", "Change %"],
+          axis = 1, inplace = True)
+monero_diff = monero.diff().dropna()
+
+monero_2017 = pd.read_csv("monero_2017.csv", parse_dates = True, index_col = 0)
+monero_2017 = monero_2017.iloc[::-1]
+monero_2017.drop(["Open", "High", "Low", "Vol.", "Change %"],
+          axis = 1, inplace = True)
+monero_2017 = monero_2017.loc["2017-01-01":"2017-01-31"]
+
+zcash = pd.read_csv("zcash.csv", parse_dates = True, index_col = 0)
+zcash = zcash.iloc[::-1]
+zcash.drop(["Open", "High", "Low", "Vol.", "Change %"],
+          axis = 1, inplace = True)
+          
+bitcoin.describe()
+monero.describe()
+drug.describe()
+zcash.describe()
+
+drug = pd.read_csv("data_drug.csv", parse_dates = True, index_col = 2) 
+# =============================================================================
+# PLOTS 
+#
+# drug_cat = drug.groupby("category").sum()
+# drug_cat.sort_values(by = ["sales"], inplace = True)
+# ax = sns.barplot(x=drug_cat.index, y="sales", data = drug_cat, order = drug_cat.index)
+# ax.set_xticklabels(ax.get_xticklabels(), rotation=30)
+# ax.tick_params(axis="x", labelsize=8)
+# plt.tight_layout()
+# plt.savefig('drug_category_sales.png', dpi = 300)
+
+#ax2 = sns.barplot(x=drug_ships_from.index, y="sales", data = drug_ships_from, order = drug_ships_from.index)
+#ax2.set_xticklabels(ax2.get_xticklabels(), rotation=30)
+#ax2.tick_params(axis="x", labelsize=8)
+#plt.tight_layout()
+#plt.savefig('ships_from_sales.png', dpi = 300)
+
+#ax3 = sns.barplot(x=drug_ships_to.index, y="sales", data = drug_ships_to, order = drug_ships_to.index)
+#ax3.set_xticklabels(ax3.get_xticklabels(), rotation=30)
+#ax3.tick_params(axis="x", labelsize=8)
+#plt.tight_layout()
+#plt.savefig('ships_to_sales.png', dpi = 300)
+
+#daily_all_variables = pd.DataFrame({"Cannabis Sales" : cannabis_daily["sales"],
+                                "Ecstasy Sales" : ecstasy_daily["sales"],
+                                "Stimulants Sales" : stimulants_daily["sales"],
+                                "Bitcoin Price" : bitcoin["Closing Price (USD)"],
+                                "Monero Price" : monero["Price"]})
+#daily_all_variables.to_csv("all_variables.csv")
+#sns.pairplot(daily_all_variables, kind="reg")
+#plt.tight_layout()
+#plt.savefig("pairplot.png", dpi = 300)
+#plt.show()
+
+#plt.figure(figsize=(12,8))
+#bitcoin.columns = ["Closing Price (USD)"]
+#ax4 = bitcoin.plot(figsize=(12,8), linewidth=3, fontsize=12, colormap = "Set2")
+#ax4.set_xlabel('Date')
+#ax4.set_title("Bitcoin Price (2016)")
+#ax4.legend(fontsize=12, loc = "upper left")
+#plt.savefig('bitcoin.png', dpi = 300)
+#plt.show()
+
+#monero.columns = ["Closing Price (USD)"]
+#ax5 = monero.plot(figsize=(12,8), linewidth=3, fontsize=12, colormap = "viridis")
+#ax5.set_xlabel('Date')
+#ax5.set_title("Monero Price (2016)")
+#ax5.legend(fontsize=12, loc = "upper left")
+#plt.savefig('monero.png', dpi = 300)
+#plt.show()
+
+#drug.columns = ["Price (USD)"]
+#ax6 = drug_daily.plot(figsize=(12,8), linewidth=3, fontsize=12, colormap = "Set1")
+#ax6.set_xlabel('Date')
+#ax6.legend(fontsize=12)
+#plt.savefig('drug.png', dpi = 300)
+#plt.show()
+
+#ax = daily_all_drugs.plot(figsize=(12,8), linewidth=3, fontsize=12, colormap = "Set1")
+#ax.set_xlabel('Date')
+#ax.legend(fontsize=12)
+#plt.savefig('drug_cat_sales.png', dpi = 300)
+#plt.show()
+# =============================================================================
+### top 3 drug categories ###
+cannabis_daily = drug.loc[drug["category"] == "Cannabis"]
+cannabis_daily = cannabis_daily.groupby('date').sum()
+cannabis_daily_diff = cannabis_daily.diff().dropna()
+
+stimulants_daily = drug.loc[drug["category"] == "Stimulants"]
+stimulants_daily = stimulants_daily.groupby('date').sum()
+stimulants_daily_diff = stimulants_daily.diff().dropna()
+
+ecstasy_daily = drug.loc[drug["category"] == "Ecstasy"]
+ecstasy_daily = ecstasy_daily.groupby('date').sum()
+ecstasy_daily_diff = ecstasy_daily.diff().dropna()
+
+drug.drop(["order_id", "item_id", "ships_from", "ships_to", "category"],
+          axis = 1, inplace = True)
+drug_daily = drug.groupby('date').sum()
+drug_daily_diff = drug_daily.diff().dropna()
+
+### aggregate sales by WEEK ###
+drug_weekly = drug_daily.resample('W-FRI').sum()
+bitcoin_weekly = bitcoin.resample('W-FRI').last()
+monero_weekly = monero.resample('W-FRI').last()
+cannabis_weekly = cannabis_daily.resample('W-FRI').sum()
+stimulants_weekly = stimulants_daily.resample('W-FRI').sum()
+ecstasy_weekly = ecstasy_daily.resample('W-FRI').sum()
+
+
+drug_weekly = drug_weekly.head(-1)
+bitcoin_weekly = bitcoin_weekly.head(-1)
+monero_weekly = monero_weekly.head(-1)
+cannabis_weekly = cannabis_weekly.head(-1)
+stimulants_weekly = stimulants_weekly.head(-1)
+ecstasy_weekly = ecstasy_weekly.head(-1)
+
+
+bitcoin_weekly_diff = bitcoin_weekly.diff().dropna()
+monero_weekly_diff = monero_weekly.diff().dropna()
+stimulants_weekly_diff = stimulants_weekly.diff().dropna()
+
+### aggregate sales by 2WEEKS ###
+drug_biweekly = drug_daily.resample('2W-FRI').sum()
+bitcoin_biweekly = bitcoin.resample('2W-FRI').last()
+monero_biweekly = monero.resample('2W-FRI').last()
+cannabis_biweekly = cannabis_daily.resample('2W-FRI').sum()
+stimulants_biweekly = stimulants_daily.resample('2W-FRI').sum()
+ecstasy_biweekly = ecstasy_daily.resample('2W-FRI').sum()
+
+drug_biweekly = drug_biweekly.head(-1)
+bitcoin_biweekly = bitcoin_biweekly.head(-1)
+monero_biweekly = monero_biweekly.head(-1)
+cannabis_biweekly = cannabis_biweekly.head(-1)
+stimulants_biweekly = stimulants_biweekly.head(-1)
+ecstasy_biweekly = ecstasy_biweekly.head(-1)
+
+drug_biweekly_diff = drug_biweekly.diff().dropna()
+bitcoin_biweekly_diff = bitcoin_biweekly.diff().dropna()
+monero_biweekly_diff = monero_biweekly.diff().dropna()
+stimulants_biweekly_diff = stimulants_biweekly.diff().dropna()
+ecstasy_biweekly_diff = ecstasy_biweekly.diff().dropna()
+
+
+
+daily_drug_bitcoin = pd.concat([drug_daily, bitcoin["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+daily_drug_monero = pd.concat([drug_daily, monero["Price"]], axis=1, join='outer', ignore_index=False)
+bitcoin_monero = pd.concat([bitcoin, monero["Price"]], axis=1, join='outer', ignore_index=False)
+
+drug_bitcoin_w = pd.concat([drug_weekly, bitcoin_weekly["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+drug_monero_w = pd.concat([drug_weekly, monero_weekly["Price"]], axis=1, join='outer', ignore_index=False)
+bitcoin_monero_w = pd.concat([bitcoin_weekly, monero_weekly["Price"]], axis=1, join='outer', ignore_index=False)
+
+drug_bitcoin_b = pd.concat([drug_biweekly, bitcoin_biweekly["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+drug_monero_b = pd.concat([drug_biweekly, monero_biweekly["Price"]], axis=1, join='outer', ignore_index=False)
+bitcoin_monero_b = pd.concat([bitcoin_biweekly, monero_biweekly["Price"]], axis=1, join='outer', ignore_index=False)
+
+cannabis_bitcoin = pd.concat([cannabis_daily, bitcoin["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+stimulants_bitcoin = pd.concat([stimulants_daily, bitcoin["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+esctasy_bitcoin = pd.concat([ecstasy_daily, bitcoin["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+cannabis_monero = pd.concat([cannabis_daily, monero["Price"]], axis=1, join='outer', ignore_index=False)
+stimulants_monero = pd.concat([stimulants_daily, monero["Price"]], axis=1, join='outer', ignore_index=False)
+esctasy_monero = pd.concat([ecstasy_daily, monero["Price"]], axis=1, join='outer', ignore_index=False)
+
+cannabis_bitcoin_w = pd.concat([cannabis_weekly, bitcoin_weekly["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+stimulants_bitcoin_w = pd.concat([stimulants_weekly, bitcoin_weekly["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+esctasy_bitcoin_w = pd.concat([ecstasy_weekly, bitcoin_weekly["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+cannabis_monero_w = pd.concat([cannabis_weekly, monero_weekly["Price"]], axis=1, join='outer', ignore_index=False)
+stimulants_monero_w = pd.concat([stimulants_weekly, monero_weekly["Price"]], axis=1, join='outer', ignore_index=False)
+esctasy_monero_w = pd.concat([ecstasy_weekly, monero_weekly["Price"]], axis=1, join='outer', ignore_index=False)
+
+cannabis_bitcoin_bi = pd.concat([cannabis_biweekly, bitcoin_biweekly["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+stimulants_bitcoin_bi = pd.concat([stimulants_biweekly, bitcoin_biweekly["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+esctasy_bitcoin_bi = pd.concat([ecstasy_biweekly, bitcoin_biweekly["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+cannabis_monero_bi = pd.concat([cannabis_biweekly, monero_biweekly["Price"]], axis=1, join='outer', ignore_index=False)
+stimulants_monero_bi = pd.concat([stimulants_biweekly, monero_biweekly["Price"]], axis=1, join='outer', ignore_index=False)
+esctasy_monero_bi = pd.concat([ecstasy_biweekly, monero_biweekly["Price"]], axis=1, join='outer', ignore_index=False)
+
+def print_coint_results(coint_results):
+    print ('--------------------------------------------------')
+    print ('--> Trace Statistics')
+    print ('variable statistic Crit-90% Crit-95%  Crit-99%')
+    for i in range(len(coint_results.lr1)):
+        print ('r =', i, '\t', round(coint_results.lr1[i], 4), coint_results.cvt[i, 0], coint_results.cvt[i, 1], coint_results.cvt[i, 2])
+    print ('--------------------------------------------------')
+
+#daily cointegration testing
+coint_results = coint_johansen(daily_drug_bitcoin, det_order=-1, k_ar_diff=7)
+print_coint_results(coint_results)
+coint_results = coint_johansen(daily_drug_monero, det_order=-1, k_ar_diff=8)
+print_coint_results(coint_results)
+
+
+coint_results = coint_johansen(stimulants_monero, det_order=-1, k_ar_diff=6)
+print_coint_results(coint_results)
+coint_results = coint_johansen(esctasy_monero, det_order=-1, k_ar_diff=6)
+print_coint_results(coint_results)
+
+#weekly
+coint_results = coint_johansen(drug_bitcoin_w, det_order=-1, k_ar_diff=9)
+print_coint_results(coint_results)
+coint_results = coint_johansen(cannabis_bitcoin_w, det_order=-1, k_ar_diff=9)
+print_coint_results(coint_results)
+coint_results = coint_johansen(esctasy_bitcoin_w, det_order=-1, k_ar_diff=10)
+print_coint_results(coint_results)
+
+
+
+def tsplot(y, lags=None, figsize=(10, 8), style='bmh'):
+    if not isinstance(y, pd.Series):
+        y = pd.Series(y)
+    with plt.style.context(style):    
+        fig = plt.figure(figsize=figsize)
+        layout = (2, 2)
+        ts_ax = plt.subplot2grid(layout, (0, 0), colspan=2)
+        acf_ax = plt.subplot2grid(layout, (1, 0))
+        pacf_ax = plt.subplot2grid(layout, (1, 1))    
+        y.plot(ax=ts_ax)
+        p_value = sm.adfuller(y)[1]
+        ts_ax.set_title('Time Series Analysis Plots\n Dickey-Fuller: p={0:.5f}'.format(p_value))
+        sm.graphics.plot_acf(y, lags=lags, ax=acf_ax, alpha=0.5)
+        sm.graphics.plot_pacf(y, lags=lags, ax=pacf_ax, alpha=0.5)
+        plt.tight_layout()
+    return
+
+### DAILY ###
+tsplot(bitcoin["Closing Price (USD)"])
+tsplot(monero["Price"])
+tsplot(drug_daily["sales"])
+tsplot(cannabis_daily["sales"])
+tsplot(stimulants_daily["sales"])
+tsplot(ecstasy_daily["sales"])
+
+tsplot(bitcoin_diff["Closing Price (USD)"])
+tsplot(monero_diff["Price"])
+tsplot(drug_daily_diff["sales"])
+tsplot(cannabis_daily_diff["sales"])
+tsplot(stimulants_daily_diff["sales"])
+tsplot(ecstasy_daily_diff["sales"])
+
+######## Total Drugs - DAILY ########
+# for daily, cannabis got no contemporaneous rship, 
+# but for stimulants and ecstasy, got contemporanous rship between the drug sales and monero prices
+# Concat 3 columns into one dataframe
+drugTotal = pd.concat([drug_daily_diff, monero_diff["Price"]], axis=1, join='outer', ignore_index=False)
+drugTotal = pd.concat([drugTotal, bitcoin_diff["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+drugTotal = drugTotal.rename(columns={"sales": "Drug_Sales", "Price": "Monero_Price", "Closing Price (USD)": "Bitcoin_Price"})
+
+# model determination
+model = VAR(drugTotal)
+print(model.select_order(maxlags=10).summary())
+
+# model estimation CHOOSE ONE!!!!!!!!!!!
+results = model.fit(6,trend="nc") #nc means no constant term
+results.summary()
+
+# model diagnosticis
+print(results.test_whiteness())
+print('The var system is stable ? {}'.format(results.is_stable()))
+print('The roots are {}'.format(results.roots))
+
+### structural analyses
+# granger causality
+print(results.test_causality('Drug_Sales', ['Bitcoin_Price'],kind='f').summary())
+print(results.test_causality('Bitcoin_Price', ['Drug_Sales'],kind='f').summary())
+print(results.test_causality('Drug_Sales', ['Monero_Price'],kind='f').summary())
+print(results.test_causality('Monero_Price', ['Drug_Sales'],kind='f').summary())
+# impulse response analyses
+irf = results.irf(20)
+irf.plot(orth=False) # false because there are no comtemperanous relations
+irf.plot_cum_effects(orth=False)
+irf.plot(orth=True) # false because there are no comtemperanous relations
+irf.plot_cum_effects(orth=True)
+results.long_run_effects()
+# forecast error decomposition
+fevd = results.fevd(5)
+results.fevd(20).plot()
+
+######## Cannabis - DAILY ########
+# Concat 3 columns into one dataframe
+cannabisRes = pd.concat([cannabis_daily_diff, monero_diff["Price"]], axis=1, join='outer', ignore_index=False)
+cannabisRes = pd.concat([cannabisRes, bitcoin_diff["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+cannabisRes = cannabisRes.rename(columns={"sales": "Cannabis_Sales", "Price": "Monero_Price", "Closing Price (USD)": "Bitcoin_Price"})
+
+# model determination
+model_1 = VAR(cannabisRes)
+print(model_1.select_order(maxlags=10).summary())
+
+# model estimation CHOOSE ONE!!!!!!!!!!!
+results_1 = model_1.fit(6,trend="nc") #nc means no constant term
+results_1.summary()
+
+# model diagnosticis
+print(results_1.test_whiteness())
+print('The var system is stable? {}'.format(results_1.is_stable()))
+print('The roots are {}'.format(results_1.roots))
+
+### structural analyses
+# granger causality
+print(results_1.test_causality('Cannabis_Sales', ['Bitcoin_Price'],kind='f').summary())
+print(results_1.test_causality('Bitcoin_Price', ['Cannabis_Sales'],kind='f').summary())
+print(results_1.test_causality('Cannabis_Sales', ['Monero_Price'],kind='f').summary())
+print(results_1.test_causality('Monero_Price', ['Cannabis_Sales'],kind='f').summary())
+# impulse response analyses
+irf_1 = results_1.irf(20)
+irf_1.plot(orth=False) # false because there are no comtemperanous relations
+irf_1.plot_cum_effects(orth=False)
+results_1.long_run_effects()
+# forecast error decomposition
+fevd = results_1.fevd(5)
+results_1.fevd(20).plot()
+
+######## Stimulants - DAILY ########
+# Concat 3 columns into one dataframe
+stimulantsRes = pd.concat([stimulants_daily_diff, monero_diff["Price"]], axis=1, join='outer', ignore_index=False)
+stimulantsRes = pd.concat([stimulantsRes, bitcoin_diff["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+stimulantsRes = stimulantsRes.rename(columns={"sales": "Stimulants_Sales", "Price": "Monero_Price", "Closing Price (USD)": "Bitcoin_Price"})
+
+# model determination
+model_2 = VAR(stimulantsRes)
+print(model_2.select_order(maxlags=10).summary())
+
+# model estimation CHOOSE ONE!!!!!!!!!!!
+results_2 = model_2.fit(6,trend="nc") #nc means no constant term
+results_2.summary()
+
+# model diagnosticis
+print(results_2.test_whiteness())
+print('The var system is stable? {}'.format(results_2.is_stable()))
+print('The roots are {}'.format(results_2.roots))
+
+### structural analyses
+# granger causality
+print(results_2.test_causality('Stimulants_Sales', ['Bitcoin_Price'],kind='f').summary())
+print(results_2.test_causality('Bitcoin_Price', ['Stimulants_Sales'],kind='f').summary())
+print(results_2.test_causality('Stimulants_Sales', ['Monero_Price'],kind='f').summary())
+print(results_2.test_causality('Monero_Price', ['Stimulants_Sales'],kind='f').summary())
+# impulse response analyses
+irf_2 = results_2.irf(20)
+irf_2.plot(orth=True) # false because there are no comtemperanous relations
+irf_2.plot_cum_effects(orth=True)
+results_2.long_run_effects()
+# forecast error decomposition
+fevd = results_2.fevd(5)
+results_2.fevd(20).plot()
+
+######## Ecstasy - DAILY ########
+# Concat 3 columns into one dataframe
+ecstasyRes = pd.concat([ecstasy_daily_diff, monero_diff["Price"]], axis=1, join='outer', ignore_index=False)
+ecstasyRes = pd.concat([ecstasyRes, bitcoin_diff["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+ecstasyRes = ecstasyRes.rename(columns={"sales": "Ecstasy_Sales", "Price": "Monero_Price", "Closing Price (USD)": "Bitcoin_Price"})
+
+# model determination
+model_3 = VAR(ecstasyRes)
+print(model_3.select_order(maxlags=10).summary())
+
+# model estimation CHOOSE ONE!!!!!!!!!!!
+results_3 = model_3.fit(6,trend="nc") #nc means no constant term
+results_3.summary()
+
+# model diagnosticis
+print(results_3.test_whiteness())
+print('The var system is stable? {}'.format(results_3.is_stable()))
+print('The roots are {}'.format(results_3.roots))
+
+### structural analyses
+# granger causality
+print(results_3.test_causality('Ecstasy_Sales', ['Bitcoin_Price'],kind='f').summary())
+print(results_3.test_causality('Bitcoin_Price', ['Ecstasy_Sales'],kind='f').summary())
+print(results_3.test_causality('Ecstasy_Sales', ['Monero_Price'],kind='f').summary())
+print(results_3.test_causality('Monero_Price', ['Ecstasy_Sales'],kind='f').summary())
+# impulse response analyses
+irf_3 = results_3.irf(20)
+irf_3.plot(orth=True) # false because there are no comtemperanous relations
+irf_3.plot_cum_effects(orth=True)
+results_3.long_run_effects()
+# forecast error decomposition
+fevd = results_3.fevd(5)
+results_3.fevd(20).plot()
+
+
+# =============================================================================
+# res = sm.adfuller(cannabis_weekly['sales'])
+# print(res[0]) # test statistic  -3.107341232011472
+# print(res[1]) # p-value 0.026014653121978457
+# =============================================================================
+
+### WEEKLY ###
+tsplot(drug_weekly["sales"]) #already stationary
+tsplot(bitcoin_weekly["Closing Price (USD)"])
+tsplot(monero_weekly["Price"])
+tsplot(cannabis_weekly["sales"]) #already stationary
+tsplot(stimulants_weekly["sales"])
+tsplot(ecstasy_weekly["sales"])#already stationary
+
+tsplot(bitcoin_weekly_diff["Closing Price (USD)"])
+tsplot(monero_weekly_diff["Price"])
+tsplot(stimulants_weekly_diff["sales"])
+
+######## Total Drugs - WEEKLY ########
+# Concat 3 columns into one dataframe
+drugTotal_w = pd.concat([drug_weekly, monero_weekly_diff["Price"]], axis=1, join='outer', ignore_index=False)
+drugTotal_w = pd.concat([drugTotal_w, bitcoin_weekly_diff["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+drugTotal_w = drugTotal_w.rename(columns={"sales": "Drug_Sales", "Price": "Monero_Price", "Closing Price (USD)": "Bitcoin_Price"})
+drugTotal_w = drugTotal_w.tail(-1)
+
+# model determination
+model = VAR(drugTotal_w)
+print(model.select_order(maxlags=10).summary())
+
+# model estimation CHOOSE ONE!!!!!!!!!!!
+results = model.fit(1,trend="nc") #nc means no constant term
+results.summary()
+
+# model diagnosticis
+print(results.test_whiteness())
+print('The var system is stable? {}'.format(results.is_stable()))
+print('The roots are {}'.format(results.roots))
+
+### structural analyses
+# granger causality
+print(results.test_causality('Drug_Sales', ['Bitcoin_Price'],kind='f').summary())
+print(results.test_causality('Bitcoin_Price', ['Drug_Sales'],kind='f').summary())
+print(results.test_causality('Drug_Sales', ['Monero_Price'],kind='f').summary())
+print(results.test_causality('Monero_Price', ['Drug_Sales'],kind='f').summary())
+# impulse response analyses
+irf = results.irf(20)
+irf.plot(orth=True) # false because there are no comtemperanous relations
+irf.plot_cum_effects(orth=True)
+results.long_run_effects()
+# forecast error decomposition
+fevd = results.fevd(5)
+results.fevd(20).plot()
+
+######## Cannabis - WEEKLY ########
+# Concat 3 columns into one dataframe
+cannabisRes_w = pd.concat([cannabis_weekly, monero_weekly_diff["Price"]], axis=1, join='outer', ignore_index=False)
+cannabisRes_w = pd.concat([cannabisRes_w, bitcoin_weekly_diff["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+cannabisRes_w = cannabisRes_w.rename(columns={"sales": "Cannabis_Sales", "Price": "Monero_Price", "Closing Price (USD)": "Bitcoin_Price"})
+cannabisRes_w = cannabisRes_w.tail(-1)
+
+# model determination
+model = VAR(cannabisRes_w)
+print(model.select_order(maxlags=10).summary())
+
+# model estimation CHOOSE ONE!!!!!!!!!!!
+results = model.fit(1,trend="nc") #nc means no constant term
+results.summary()
+
+# model diagnosticis
+print(results.test_whiteness())
+print('The var system is stable? {}'.format(results.is_stable()))
+print('The roots are {}'.format(results.roots))
+
+### structural analyses
+# granger causality
+print(results.test_causality('Cannabis_Sales', ['Bitcoin_Price'],kind='f').summary())
+print(results.test_causality('Bitcoin_Price', ['Cannabis_Sales'],kind='f').summary())
+print(results.test_causality('Cannabis_Sales', ['Monero_Price'],kind='f').summary())
+print(results.test_causality('Monero_Price', ['Cannabis_Sales'],kind='f').summary())
+# impulse response analyses
+irf = results.irf(20)
+irf.plot(orth=True) # false because there are no comtemperanous relations
+irf.plot_cum_effects(orth=True)
+results.long_run_effects()
+# forecast error decomposition
+fevd = results.fevd(5)
+results.fevd(20).plot()
+
+######## Stimulants - WEEKLY ########
+# Concat 3 columns into one dataframe
+stimulantsRes_w = pd.concat([stimulants_weekly_diff, monero_weekly_diff["Price"]], axis=1, join='outer', ignore_index=False)
+stimulantsRes_w = pd.concat([stimulantsRes_w, bitcoin_weekly_diff["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+stimulantsRes_w = stimulantsRes_w.rename(columns={"sales": "Stimulant_Sales", "Price": "Monero_Price", "Closing Price (USD)": "Bitcoin_Price"})
+
+# model determination
+model = VAR(stimulantsRes_w)
+print(model.select_order(maxlags=10).summary())
+
+# model estimation CHOOSE ONE!!!!!!!!!!!
+results = model.fit(1,trend="nc") #nc means no constant term
+results.summary()
+
+# model diagnosticis
+print(results.test_whiteness())
+print('The var system is stable? {}'.format(results.is_stable()))
+print('The roots are {}'.format(results.roots))
+
+### structural analyses
+# granger causality
+print(results.test_causality('Stimulant_Sales', ['Bitcoin_Price'],kind='f').summary())
+print(results.test_causality('Bitcoin_Price', ['Stimulant_Sales'],kind='f').summary())
+print(results.test_causality('Stimulant_Sales', ['Monero_Price'],kind='f').summary())
+print(results.test_causality('Monero_Price', ['Stimulant_Sales'],kind='f').summary())
+# impulse response analyses
+irf = results.irf(20)
+irf.plot(orth=True) # false because there are no comtemperanous relations
+irf.plot_cum_effects(orth=True)
+results.long_run_effects()
+# forecast error decomposition
+fevd = results.fevd(5)
+results.fevd(20).plot()
+
+######## Ecstasy - WEEKLY ########
+# Concat 3 columns into one dataframe
+ecstasyRes_w = pd.concat([ecstasy_weekly, monero_weekly_diff["Price"]], axis=1, join='outer', ignore_index=False)
+ecstasyRes_w = pd.concat([ecstasyRes_w, bitcoin_weekly_diff["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+ecstasyRes_w = ecstasyRes_w.rename(columns={"sales": "Ecstasy_Sales", "Price": "Monero_Price", "Closing Price (USD)": "Bitcoin_Price"})
+ecstasyRes_w = ecstasyRes_w.tail(-1)
+
+# model determination
+model = VAR(ecstasyRes_w)
+print(model.select_order(maxlags=6).summary())
+
+# model estimation CHOOSE ONE!!!!!!!!!!!
+results = model.fit(1,trend="nc") #nc means no constant term
+results.summary()
+
+# model diagnosticis
+print(results.test_whiteness())
+print('The var system is stable? {}'.format(results.is_stable()))
+print('The roots are {}'.format(results.roots))
+
+### structural analyses
+# granger causality
+print(results.test_causality('Ecstasy_Sales', ['Bitcoin_Price'],kind='f').summary())
+print(results.test_causality('Bitcoin_Price', ['Ecstasy_Sales'],kind='f').summary())
+print(results.test_causality('Ecstasy_Sales', ['Monero_Price'],kind='f').summary())
+print(results.test_causality('Monero_Price', ['Ecstasy_Sales'],kind='f').summary())
+# impulse response analyses
+irf = results.irf(20)
+irf.plot(orth=True) # false because there are no comtemperanous relations
+irf.plot_cum_effects(orth=True)
+results.long_run_effects()
+# forecast error decomposition
+fevd = results.fevd(5)
+results.fevd(20).plot()
+
+
+
+
+### BIWEEKLY ###
+tsplot(drug_biweekly["sales"])
+tsplot(bitcoin_biweekly["Closing Price (USD)"])
+tsplot(monero_biweekly["Price"])
+tsplot(cannabis_biweekly["sales"]) #already stationary
+tsplot(stimulants_biweekly["sales"])
+tsplot(ecstasy_biweekly["sales"])
+
+tsplot(drug_biweekly_diff["sales"])
+tsplot(bitcoin_biweekly_diff["Closing Price (USD)"])
+tsplot(monero_biweekly_diff["Price"])
+tsplot(stimulants_biweekly_diff["sales"])
+tsplot(ecstasy_biweekly_diff["sales"])
+
+######## Total Drugs - BIWEEKLY ########
+# Concat 3 columns into one dataframe
+drugTotal_b = pd.concat([drug_biweekly_diff, monero_biweekly_diff["Price"]], axis=1, join='outer', ignore_index=False)
+drugTotal_b = pd.concat([drugTotal_b, bitcoin_biweekly_diff["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+drugTotal_b = drugTotal_b.rename(columns={"sales": "Drug_Sales", "Price": "Monero_Price", "Closing Price (USD)": "Bitcoin_Price"})
+
+# model determination
+model = VAR(drugTotal_b)
+print(model.select_order(maxlags=6).summary())
+
+# model estimation CHOOSE ONE!!!!!!!!!!!
+results = model.fit(1,trend="nc") #nc means no constant term
+results.summary()
+
+# model diagnosticis
+print(results.test_whiteness())
+print('The var system is stable? {}'.format(results.is_stable()))
+print('The roots are {}'.format(results.roots))
+
+### structural analyses
+# granger causality
+print(results.test_causality('Drug_Sales', ['Bitcoin_Price'],kind='f').summary())
+print(results.test_causality('Bitcoin_Price', ['Drug_Sales'],kind='f').summary())
+print(results.test_causality('Drug_Sales', ['Monero_Price'],kind='f').summary())
+print(results.test_causality('Monero_Price', ['Drug_Sales'],kind='f').summary())
+# impulse response analyses
+irf = results.irf(20)
+irf.plot(orth=False) # false because there are no comtemperanous relations
+irf.plot_cum_effects(orth=False)
+results.long_run_effects()
+# forecast error decomposition
+fevd = results.fevd(5)
+results.fevd(20).plot()
+
+######## Cannabis - BIWEEKLY ########
+# Concat 3 columns into one dataframe
+cannabisRes_b = pd.concat([cannabis_biweekly, monero_biweekly_diff["Price"]], axis=1, join='outer', ignore_index=False)
+cannabisRes_b = pd.concat([cannabisRes_b, bitcoin_biweekly_diff["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+cannabisRes_b = cannabisRes_b.rename(columns={"sales": "Cannabis_Sales", "Price": "Monero_Price", "Closing Price (USD)": "Bitcoin_Price"})
+cannabisRes_b = cannabisRes_b.tail(-1)
+
+# model determination
+model = VAR(cannabisRes_b)
+print(model.select_order(maxlags=5).summary())
+
+# model estimation CHOOSE ONE!!!!!!!!!!!
+results = model.fit(1,trend="nc") #nc means no constant term
+results.summary()
+
+# model diagnosticis
+print(results.test_whiteness())
+print('The var system is stable? {}'.format(results.is_stable()))
+print('The roots are {}'.format(results.roots))
+
+### structural analyses
+# granger causality
+print(results.test_causality('Cannabis_Sales', ['Bitcoin_Price'],kind='f').summary())
+print(results.test_causality('Bitcoin_Price', ['Cannabis_Sales'],kind='f').summary())
+print(results.test_causality('Cannabis_Sales', ['Monero_Price'],kind='f').summary())
+print(results.test_causality('Monero_Price', ['Cannabis_Sales'],kind='f').summary())
+# impulse response analyses
+irf = results.irf(20)
+irf.plot(orth=False) # false because there are no comtemperanous relations
+irf.plot_cum_effects(orth=False)
+results.long_run_effects()
+# forecast error decomposition
+fevd = results.fevd(5)
+results.fevd(20).plot()
+
+######## Stimulants - BIWEEKLY ########
+# Concat 3 columns into one dataframe
+stimulantsRes_b = pd.concat([stimulants_biweekly_diff, monero_biweekly_diff["Price"]], axis=1, join='outer', ignore_index=False)
+stimulantsRes_b = pd.concat([stimulantsRes_b, bitcoin_biweekly_diff["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+stimulantsRes_b = stimulantsRes_b.rename(columns={"sales": "Stimulant_Sales", "Price": "Monero_Price", "Closing Price (USD)": "Bitcoin_Price"})
+
+# model determination
+model = VAR(stimulantsRes_b)
+print(model.select_order(maxlags=5).summary())
+
+# model estimation CHOOSE ONE!!!!!!!!!!!
+results = model.fit(1,trend="nc") #nc means no constant term
+results.summary()
+
+# model diagnosticis
+print(results.test_whiteness())
+print('The var system is stable? {}'.format(results.is_stable()))
+print('The roots are {}'.format(results.roots))
+
+### structural analyses
+# granger causality
+print(results.test_causality('Stimulant_Sales', ['Bitcoin_Price'],kind='f').summary())
+print(results.test_causality('Bitcoin_Price', ['Stimulant_Sales'],kind='f').summary())
+print(results.test_causality('Stimulant_Sales', ['Monero_Price'],kind='f').summary())
+print(results.test_causality('Monero_Price', ['Stimulant_Sales'],kind='f').summary())
+# impulse response analyses
+irf = results.irf(20)
+irf.plot(orth=False) # false because there are no comtemperanous relations
+irf.plot_cum_effects(orth=False)
+results.long_run_effects()
+# forecast error decomposition
+fevd = results.fevd(5)
+results.fevd(20).plot()
+
+######## Ecstasy - BIWEEKLY ########
+# Concat 3 columns into one dataframe
+ecstasyRes_b = pd.concat([ecstasy_biweekly_diff, monero_biweekly_diff["Price"]], axis=1, join='outer', ignore_index=False)
+ecstasyRes_b = pd.concat([ecstasyRes_b, bitcoin_biweekly_diff["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+ecstasyRes_b = ecstasyRes_b.rename(columns={"sales": "Ecstasy_Sales", "Price": "Monero_Price", "Closing Price (USD)": "Bitcoin_Price"})
+
+# model determination
+model = VAR(ecstasyRes_b)
+print(model.select_order(maxlags=5).summary())
+
+# model estimation CHOOSE ONE!!!!!!!!!!!
+results = model.fit(1,trend="nc") #nc means no constant term
+results.summary()
+
+# model diagnosticis
+print(results.test_whiteness())
+print('The var system is stable? {}'.format(results.is_stable()))
+print('The roots are {}'.format(results.roots))
+
+### structural analyses
+# granger causality
+print(results.test_causality('Ecstasy_Sales', ['Bitcoin_Price'],kind='f').summary())
+print(results.test_causality('Bitcoin_Price', ['Ecstasy_Sales'],kind='f').summary())
+print(results.test_causality('Ecstasy_Sales', ['Monero_Price'],kind='f').summary())
+print(results.test_causality('Monero_Price', ['Ecstasy_Sales'],kind='f').summary())
+# impulse response analyses
+irf = results.irf(20)
+irf.plot(orth=False) # false because there are no comtemperanous relations
+irf.plot_cum_effects(orth=False)
+results.long_run_effects()
+# forecast error decomposition
+fevd = results.fevd(5)
+results.fevd(20).plot()
+
+# =============================================================================
+# tsplot(drug_monthly["sales"])
+# tsplot(drug_monthly_diff["sales"])
+# =============================================================================
+
+#daily_drug_bitcoin var forecast
+train_size = int(len(daily_drug_bitcoin) * 0.70)
+x_train, x_test = daily_drug_bitcoin[0:train_size], daily_drug_bitcoin[train_size:]
+t = x_train.diff().dropna()
+model = VAR(t)
+print(model.select_order(maxlags=10).summary())
+results = model.fit(8)
+lag_order = results.k_ar
+pred = results.forecast(t.values[lag_order:], len(x_test))
+pred_df =pd.DataFrame(pred, index=daily_drug_bitcoin.index[-len(x_test):], columns=daily_drug_bitcoin.columns)
+
+pred_inverse = pred_df.cumsum()
+f = pred_inverse + x_test
+forecast_errors = [x_test.Price[i]-f.Price[i] for i in range(len(x_test))]
+
+plt.figure(figsize=(12,5))
+plt.xlabel('Date')
+ax1 = x_test.Price.plot(color = 'blue', grid = True, label = 'Actual Price')
+ax2 = f.Price.plot(color = 'red', grid = True, label = ' Forecasted Price')
+ax1.legend(loc=1)
+ax2.legend(loc=2)
+plt.title('Predicted vs Actual Price')
+plt.show()
+
+bias = sum(forecast_errors) * 1.0/len(x_test)
+print('Bias: %f' % bias)
+mae = mean_absolute_error(x_test.Price, f.Price)
+print('Mean absolute error (MAE):  %f' % mae)
+mse = mean_squared_error(x_test.Price, f.Price)
+print('Mean squared error (MSE):  %f' % mse)
+rmse = math.sqrt(mse)
+print('Root Mean squared error (RMSE): %f' % rmse)
+
+#daily stimulants/monero
+stimulants_monero_f = pd.concat([stimulants_daily, monero["Price"]], axis=1, join='outer', ignore_index=False)
+train_size = int(len(stimulants_monero_f) * 0.70)
+x_train, x_test = stimulants_monero_f[0:train_size], stimulants_monero_f[train_size:]
+t = x_train.diff().dropna()
+model = VAR(t)
+print(model.select_order(maxlags=10).summary())
+results = model.fit(6)
+lag_order = results.k_ar
+pred = results.forecast(t.values[lag_order:], len(x_test))
+pred_df =pd.DataFrame(pred, index=stimulants_monero_f.index[-len(x_test):], columns=stimulants_monero_f.columns)
+
+pred_inverse = pred_df.cumsum()
+f = pred_inverse + x_test
+forecast_errors = [x_test.Price[i]-f.Price[i] for i in range(len(x_test))]
+
+plt.figure(figsize=(12,5))
+plt.xlabel('Date')
+ax1 = x_test.Price.plot(color = 'blue', grid = True, label = 'Actual Price')
+ax2 = f.Price.plot(color = 'red', grid = True, label = ' Forecasted Price')
+ax1.legend(loc=1)
+ax2.legend(loc=2)
+plt.title('Predicted vs Actual Price')
+plt.show()
+
+bias = sum(forecast_errors) * 1.0/len(x_test)
+print('Bias: %f' % bias)
+mae = mean_absolute_error(x_test.Price, f.Price)
+print('Mean absolute error (MAE):  %f' % mae)
+mse = mean_squared_error(x_test.Price, f.Price)
+print('Mean squared error (MSE):  %f' % mse)
+rmse = math.sqrt(mse)
+print('Root Mean squared error (RMSE): %f' % rmse)
+
+#2017 
+monero_2017
+
+pred = results.forecast(t.values[lag_order:], len(monero_2017))
+pred_df =pd.DataFrame(pred, index=monero_2017.index[-len(monero_2017):], columns=stimulants_monero_f.columns)
+
+pred_inverse = pred_df.cumsum()
+f = pred_inverse + monero_2017
+forecast_errors = [monero_2017.Price[i]-f.Price[i] for i in range(len(monero_2017))]
+plt.figure(figsize=(12,5))
+plt.xlabel('Date')
+ax1 = monero_2017.Price.plot(color = 'blue', grid = True, label = 'Actual Price')
+ax2 = f.Price.plot(color = 'red', grid = True, label = ' Forecasted Price')
+ax1.legend(loc=1)
+ax2.legend(loc=2)
+plt.title('Predicted vs Actual Price')
+plt.show()
+
+bias = sum(forecast_errors) * 1.0/len(monero_2017)
+print('Bias: %f' % bias)
+mae = mean_absolute_error(monero_2017.Price, f.Price)
+print('Mean absolute error (MAE):  %f' % mae)
+mse = mean_squared_error(monero_2017.Price, f.Price)
+print('Mean squared error (MSE):  %f' % mse)
+rmse = math.sqrt(mse)
+print('Root Mean squared error (RMSE): %f' % rmse)
+
+
+
+#daily esctasy/monero
+ecstasy_monero_f = pd.concat([ecstasy_daily, monero["Price"]], axis=1, join='outer', ignore_index=False)
+train_size = int(len(ecstasy_monero_f) * 0.70)
+x_train, x_test = ecstasy_monero_f[0:train_size], ecstasy_monero_f[train_size:]
+t = x_train.diff().dropna()
+model = VAR(t)
+print(model.select_order(maxlags=10).summary())
+results = model.fit(10)
+lag_order = results.k_ar
+pred = results.forecast(t.values[lag_order:], len(x_test))
+#pred = results.forecast(t.values[-len(x_test)+1:], len(x_test))
+pred_df =pd.DataFrame(pred, index=ecstasy_monero_f.index[-len(x_test):], columns=ecstasy_monero_f.columns)
+
+pred_inverse = pred_df.cumsum()
+f = pred_inverse + x_test
+forecast_errors = [x_test.Price[i]-f.Price[i] for i in range(len(x_test))]
+
+plt.figure(figsize=(12,5))
+plt.xlabel('Date')
+ax1 = x_test.Price.plot(color = 'blue', grid = True, label = 'Actual Price')
+ax2 = f.Price.plot(color = 'red', grid = True, label = ' Forecasted Price')
+ax1.legend(loc=1)
+ax2.legend(loc=2)
+plt.title('Predicted vs Actual Price')
+plt.show()
+
+bias = sum(forecast_errors) * 1.0/len(x_test)
+print('Bias: %f' % bias)
+mae = mean_absolute_error(x_test.Price, f.Price)
+print('Mean absolute error (MAE):  %f' % mae)
+mse = mean_squared_error(x_test.Price, f.Price)
+print('Mean squared error (MSE):  %f' % mse)
+rmse = math.sqrt(mse)
+print('Root Mean squared error (RMSE): %f' % rmse)
+
+
+
+#weekly total drugs/bitcoin
+drugs_bitcoin_f = pd.concat([drug_weekly, bitcoin_weekly["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+drugs_bitcoin_f = drugs_bitcoin_f.rename(columns={"Closing Price (USD)": "Price"})
+train_size = int(len(drugs_bitcoin_f) * 0.70)
+x_train, x_test = drugs_bitcoin_f[0:train_size], drugs_bitcoin_f[train_size:]
+t = x_train.diff().dropna()
+model = VAR(t)
+print(model.select_order(maxlags=10).summary())
+results = model.fit(9, trend= 'nc')
+lag_order = results.k_ar
+pred = results.forecast(t.values[lag_order:], len(x_test))
+pred_df =pd.DataFrame(pred, index=drugs_bitcoin_f.index[-len(x_test):], columns=drugs_bitcoin_f.columns)
+
+pred_inverse = pred_df.cumsum()
+f = pred_inverse + x_test
+forecast_errors = [x_test.Price[i]-f.Price[i] for i in range(len(x_test))]
+
+plt.figure(figsize=(12,5))
+plt.xlabel('Date')
+ax1 = x_test.Price.plot(color = 'blue', grid = True, label = 'Actual Price')
+ax2 = f.Price.plot(color = 'red', grid = True, label = ' Forecasted Price')
+ax1.legend(loc=1)
+ax2.legend(loc=2)
+plt.title('Predicted vs Actual Price')
+plt.show()
+
+bias = sum(forecast_errors) * 1.0/len(x_test)
+print('Bias: %f' % bias)
+mae = mean_absolute_error(x_test.Price, f.Price)
+print('Mean absolute error (MAE):  %f' % mae)
+mse = mean_squared_error(x_test.Price, f.Price)
+print('Mean squared error (MSE):  %f' % mse)
+rmse = math.sqrt(mse)
+print('Root Mean squared error (RMSE): %f' % rmse)
+
+#weekly cannabis/bitcoin
+cannabis_bitcoin_f = pd.concat([cannabis_weekly, bitcoin_weekly["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+cannabis_bitcoin_f = cannabis_bitcoin_f.rename(columns={"Closing Price (USD)": "Price"})
+train_size = int(len(cannabis_bitcoin_f) * 0.70)
+x_train, x_test = cannabis_bitcoin_f[0:train_size], cannabis_bitcoin_f[train_size:]
+t = x_train.diff().dropna()
+model = VAR(t)
+print(model.select_order(maxlags=10).summary())
+results = model.fit(9, trend= 'nc')
+lag_order = results.k_ar
+pred = results.forecast(t.values[lag_order:], len(x_test))
+#pred = results.forecast(t.values[-len(x_test)+1:], len(x_test))
+pred_df =pd.DataFrame(pred, index=cannabis_bitcoin_f.index[-len(x_test):], columns=cannabis_bitcoin_f.columns)
+
+pred_inverse = pred_df.cumsum()
+f = pred_inverse + x_test
+forecast_errors = [x_test.Price[i]-f.Price[i] for i in range(len(x_test))]
+
+plt.figure(figsize=(12,5))
+plt.xlabel('Date')
+ax1 = x_test.Price.plot(color = 'blue', grid = True, label = 'Actual Price')
+ax2 = f.Price.plot(color = 'red', grid = True, label = ' Forecasted Price')
+ax1.legend(loc=1)
+ax2.legend(loc=2)
+plt.title('Predicted vs Actual Price')
+plt.show()
+
+bias = sum(forecast_errors) * 1.0/len(x_test)
+print('Bias: %f' % bias)
+mae = mean_absolute_error(x_test.Price, f.Price)
+print('Mean absolute error (MAE):  %f' % mae)
+mse = mean_squared_error(x_test.Price, f.Price)
+print('Mean squared error (MSE):  %f' % mse)
+rmse = math.sqrt(mse)
+print('Root Mean squared error (RMSE): %f' % rmse)
+
+#weekly ecstasy/bitcoin
+ecstasy_bitcoin_f = pd.concat([ecstasy_weekly, bitcoin_weekly["Closing Price (USD)"]], axis=1, join='outer', ignore_index=False)
+ecstasy_bitcoin_f = ecstasy_bitcoin_f.rename(columns={"Closing Price (USD)": "Price"})
+train_size = int(len(ecstasy_bitcoin_f) * 0.70)
+x_train, x_test = ecstasy_bitcoin_f[0:train_size], ecstasy_bitcoin_f[train_size:]
+t = x_train.diff().dropna()
+model = VAR(t)
+print(model.select_order(maxlags=10).summary())
+results = model.fit(10,trend='nc')
+lag_order = results.k_ar
+pred = results.forecast(t.values[lag_order:], len(x_test))
+pred_df =pd.DataFrame(pred, index=ecstasy_bitcoin_f.index[-len(x_test):], columns=ecstasy_bitcoin_f.columns)
+
+pred_inverse = pred_df.cumsum()
+f = pred_inverse + x_test
+forecast_errors = [x_test.Price[i]-f.Price[i] for i in range(len(x_test))]
+
+plt.figure(figsize=(12,5))
+plt.xlabel('Date')
+ax1 = x_test.Price.plot(color = 'blue', grid = True, label = 'Actual Price')
+ax2 = f.Price.plot(color = 'red', grid = True, label = ' Forecasted Price')
+ax1.legend(loc=1)
+ax2.legend(loc=2)
+plt.title('Predicted vs Actual Price')
+plt.show()
+
+bias = sum(forecast_errors) * 1.0/len(x_test)
+print('Bias: %f' % bias)
+mae = mean_absolute_error(x_test.Price, f.Price)
+print('Mean absolute error (MAE):  %f' % mae)
+mse = mean_squared_error(x_test.Price, f.Price)
+print('Mean squared error (MSE):  %f' % mse)
+rmse = math.sqrt(mse)
+print('Root Mean squared error (RMSE): %f' % rmse)
+
+
+
+pred = results.forecast(t.values[lag_order:], len(bitcoin2017_weekly))
+pred_df =pd.DataFrame(pred, index=bitcoin2017_weekly.index[-len(bitcoin2017_weekly):], columns=ecstasy_bitcoin_f.columns)
+
+pred_inverse = pred_df.cumsum()
+f = pred_inverse + bitcoin2017_weekly
+forecast_errors = [bitcoin2017_weekly.Price[i]-f.Price[i] for i in range(len(bitcoin2017_weekly))]
+plt.figure(figsize=(12,5))
+plt.xlabel('Date')
+ax1 = bitcoin2017_weekly.Price.plot(color = 'blue', grid = True, label = 'Actual Price')
+ax2 = f.Price.plot(color = 'red', grid = True, label = ' Forecasted Price')
+ax1.legend(loc=1)
+ax2.legend(loc=2)
+plt.title('Predicted vs Actual Price')
+plt.show()
+
+bias = sum(forecast_errors) * 1.0/len(bitcoin2017_weekly)
+print('Bias: %f' % bias)
+mae = mean_absolute_error(bitcoin2017_weekly.Price, f.Price)
+print('Mean absolute error (MAE):  %f' % mae)
+mse = mean_squared_error(bitcoin2017_weekly.Price, f.Price)
+print('Mean squared error (MSE):  %f' % mse)
+rmse = math.sqrt(mse)
+print('Root Mean squared error (RMSE): %f' % rmse)
+
+
+
+####### FORECAST FOR VECM ##########
+daily_drug_bitcoin = daily_drug_bitcoin.rename(columns={"Closing Price (USD)": "Price"})
+train_size = int(len(daily_drug_bitcoin) * 0.7)
+x_train, x_test = daily_drug_bitcoin[0:train_size], daily_drug_bitcoin[train_size:]
+vecm_model = VECM(endog = x_train, k_ar_diff = 7, coint_rank = 1, deterministic = 'colo')
+vecm_fit = vecm_model.fit()
+vecm_fit.summary()
+
+#vecm_fit.predict(steps= len(x_test))
+print(vecm_fit.test_whiteness())
+forecast, lower, upper = vecm_fit.predict(len(x_test), 0.05)
+
+forecast_df =pd.DataFrame(forecast, index=daily_drug_bitcoin.index[-len(x_test):], 
+                          columns = daily_drug_bitcoin.columns)
+
+print("lower bounds of confidence intervals:")
+print(lower.round(3))
+print("\npoint forecasts:")
+print(forecast.round(3))
+print("\nupper bounds of confidence intervals:")
+print(upper.round(3))
+
+plt.figure(figsize=(12,5))
+plt.xlabel('Date')
+ax1 = x_test.Price.plot(color = 'blue', grid = True, label = 'Actual Price')
+ax2 = forecast_df.Price.plot(color = 'red', grid = True, label = ' Forecasted Price')
+ax1.legend(loc=1)
+ax2.legend(loc=2)
+plt.title('Predicted vs Actual Price')
+plt.show()
+
+forecast_errors = [x_test.Price[i]-forecast_df.Price[i] for i in range(len(x_test))]
+bias = sum(forecast_errors) * 1.0/len(x_test)
+print('Bias: %f' % bias)
+mae = mean_absolute_error(x_test.Price, forecast_df.Price)
+print('Mean absolute error (MAE):  %f' % mae)
+mse = mean_squared_error(x_test.Price, forecast_df.Price)
+print('Mean squared error (MSE):  %f' % mse)
+rmse = math.sqrt(mse)
+print('Root Mean squared error (RMSE): %f' % rmse)
+
+train_size = int(len(daily_drug_bitcoin) * 0.7)
+x_train, x_test = daily_drug_bitcoin[0:train_size], daily_drug_bitcoin[train_size:]
+vecm_model = VECM(endog = x_train, k_ar_diff = 7, coint_rank = 1, deterministic = 'colo')
+vecm_fit = vecm_model.fit()
+vecm_fit.summary()
